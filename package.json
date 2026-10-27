@@ -1,0 +1,44 @@
+{
+  "name": "autogroupposter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit && tsc -p functions/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "release": "node scripts/release.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "dev:local": "node scripts/dev-local.mjs",
+    "dev:backend": "node scripts/emulators.mjs --serve",
+    "dev:extension": "node scripts/build-local-extension.mjs",
+    "dev:seed": "node scripts/seed-local.mjs",
+    "test:emulators": "node scripts/emulators.mjs",
+    "review:design": "node scripts/review-design.mjs"
+  },
+  "dependencies": {
+    "firebase": "^13.1.0",
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.7.0",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.3"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}

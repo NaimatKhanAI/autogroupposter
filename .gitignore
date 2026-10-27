@@ -1,0 +1,13 @@
+node_modules/
+dist/
+lib/
+.env
+.env.local
+.env.*
+!**/.env*.example
+.secret.local
+*.log
+apps/mobile/android/
+.firebase/
+artifacts/
+*.secret

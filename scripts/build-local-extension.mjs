@@ -1,0 +1,10 @@
+import {build} from 'vite';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+process.env.VITE_EMULATOR='true';
+const root=process.cwd(),out=path.join(root,'dist/chrome-extension-local');
+await build({configFile:false,root:path.join(root,'apps/chrome-extension'),envDir:root,base:'./',build:{outDir:out,emptyOutDir:true,rollupOptions:{input:{popup:path.join(root,'apps/chrome-extension/popup.html'),sidepanel:path.join(root,'apps/chrome-extension/sidepanel.html')}}}});
+await build({configFile:false,root,envDir:root,build:{outDir:out,emptyOutDir:false,lib:{entry:path.join(root,'apps/chrome-extension/src/background.ts'),formats:['es'],fileName:()=> 'background.js'}}});
+await fs.copyFile('dist/chrome-extension/manifest.json',path.join(out,'manifest.json'));
+await fs.cp('assets/icons',path.join(out,'icons'),{recursive:true});
+console.log('Local-only extension: dist/chrome-extension-local. Production release ZIP unchanged.');

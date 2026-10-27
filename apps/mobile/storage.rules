@@ -1,0 +1,7 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Media uploads are not part of the current app. Deny until an owned upload flow is added.
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

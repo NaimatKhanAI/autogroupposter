@@ -1,0 +1,11 @@
+node_modules
+node_modules.previous
+package-lock.json
+dist
+coverage
+.expo
+
+functions/lib
+.firebase
+functions/package-lock.json
+.tools

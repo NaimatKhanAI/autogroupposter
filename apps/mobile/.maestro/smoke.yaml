@@ -1,0 +1,20 @@
+appId: com.groupposter.manager
+---
+- launchApp:
+    clearState: true
+- assertVisible: 'A better sharing routine.'
+- tapOn: 'Email address'
+- inputText: '${TEST_EMAIL}'
+- tapOn: 'Password'
+- inputText: '${TEST_PASSWORD}'
+- tapOn: 'Sign in to your workspace'
+- assertVisible: 'Your sharing workspace'
+- tapOn: 'Groups'
+- assertVisible: 'Your groups'
+- tapOn: 'Add group'
+- assertVisible: 'Group name'
+- tapOn: 'Close'
+- tapOn: 'Queue'
+- assertVisible: 'Sharing queue'
+- tapOn: 'Settings'
+- assertVisible: 'Profile & scheduling'

@@ -1,0 +1,186 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verified() { return request.auth != null && request.auth.token.email_verified == true; }
+    function owner() { return verified() && resource.data.owner_id == request.auth.uid; }
+    function accountActive() {
+      return verified() && (!exists(/databases/$(database)/documents/workspace_locks/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/workspace_locks/$(request.auth.uid)).data.get('deleting', false) != true);
+    }
+    function admin() {
+      return verified() && exists(/databases/$(database)/documents/app_admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/app_admins/$(request.auth.uid)).data.enabled == true;
+    }
+    function entitled() {
+      let path = /databases/$(database)/documents/memberships/$(request.auth.uid);
+      return verified() && (admin() || (exists(path) && get(path).data.blocked == false &&
+        (get(path).data.approved_free == true ||
+          (get(path).data.subscription_until is timestamp && get(path).data.subscription_until > request.time) ||
+          get(path).data.trial_started_at + duration.value(14, 'd') > request.time)));
+    }
+    function active() { return accountActive() && entitled(); }
+    function cleanup() {
+      return verified() && exists(/databases/$(database)/documents/workspace_locks/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/workspace_locks/$(request.auth.uid)).data.deleting == true;
+    }
+    function workspaceReadable() { return entitled() || cleanup(); }
+    match /app_admins/{uid} {
+      allow get: if verified() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    function price(value) { return value is string && (value == '' || value.matches('^[0-9]{1,9}([.][0-9]{1,6})?$')); }
+    match /membership_config/{id} {
+      allow get: if verified() && id == 'default';
+      allow create, update: if admin() && id == 'default' &&
+        request.resource.data.keys().hasAll(['monthly_prices','contact_email','payment_instructions','updated_at','updated_by']) &&
+        request.resource.data.keys().hasOnly(['monthly_prices','contact_email','payment_instructions','updated_at','updated_by']) &&
+        request.resource.data.monthly_prices.keys().hasAll(['USDT','PKR','SAR','AED']) && request.resource.data.monthly_prices.keys().hasOnly(['USDT','PKR','SAR','AED']) &&
+        price(request.resource.data.monthly_prices.USDT) && price(request.resource.data.monthly_prices.PKR) && price(request.resource.data.monthly_prices.SAR) && price(request.resource.data.monthly_prices.AED) &&
+        request.resource.data.contact_email is string && request.resource.data.contact_email.size() <= 320 &&
+        request.resource.data.payment_instructions is string && request.resource.data.payment_instructions.size() <= 2000 &&
+        request.resource.data.updated_at == request.time && request.resource.data.updated_by == request.auth.uid;
+      allow list, delete: if false;
+    }
+    function membership(d, uid) {
+      return d.keys().hasAll(['uid','email','display_name','trial_started_at','approved_free','subscription_until','blocked','updated_at','updated_by']) &&
+        d.keys().hasOnly(['uid','email','display_name','trial_started_at','approved_free','subscription_until','blocked','updated_at','updated_by']) &&
+        d.uid == uid && d.email is string && d.email.size() <= 320 && d.display_name is string && d.display_name.size() <= 120 &&
+        d.trial_started_at is timestamp && d.approved_free is bool && d.blocked is bool &&
+        (d.subscription_until == null || d.subscription_until is timestamp) && d.updated_at == request.time && d.updated_by == request.auth.uid;
+    }
+    match /memberships/{uid} {
+      allow get: if verified() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      allow create: if accountActive() && request.auth.uid == uid && membership(request.resource.data, uid) &&
+        request.resource.data.email == request.auth.token.email && request.resource.data.trial_started_at == request.time &&
+        request.resource.data.approved_free == false && request.resource.data.subscription_until == null && request.resource.data.blocked == false;
+      allow update: if admin() && membership(request.resource.data, uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved_free','subscription_until','blocked','updated_at','updated_by']);
+      allow delete: if verified() && request.auth.uid == uid && cleanup();
+    }
+    function mine(d) { return d.owner_id == request.auth.uid; }
+    function related(table, id) { return getAfter(/databases/$(database)/documents/$(table)/$(id)).data.owner_id == request.auth.uid; }
+    function identity(d, id) { return mine(d) && d.id == id; }
+    function created(d, id) { return active() && identity(d, id) && d.created_at == request.time; }
+    function unchanged(d) { return active() && owner() && d.owner_id == resource.data.owner_id && d.id == resource.data.id && d.created_at == resource.data.created_at; }
+    function nullableText(v, size) { return v == null || (v is string && v.size() <= size); }
+    function hashId(kind, value) { return hashing.sha256(request.auth.uid + ':' + kind + ':' + value).toHexString().lower(); }
+    function profile(d) {
+      return d.keys().hasAll(['id','display_name','timezone','appearance','notifications_enabled','posting_window_start','posting_window_end','default_page_id','created_at']) &&
+        d.keys().hasOnly(['id','display_name','timezone','appearance','notifications_enabled','posting_window_start','posting_window_end','default_page_id','created_at']) &&
+        d.id == request.auth.uid && d.display_name is string && d.display_name.size() <= 120 &&
+        d.timezone is string && d.timezone.size() <= 100 && d.appearance in ['system','light','dark'] && d.notifications_enabled == false &&
+        d.posting_window_start.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$') && d.posting_window_end.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$') &&
+        (d.default_page_id == null || (d.default_page_id is string && related('connected_pages', d.default_page_id)));
+    }
+    match /profiles/{uid} {
+      allow read: if verified() && request.auth.uid == uid;
+      allow create: if accountActive() && request.auth.uid == uid && profile(request.resource.data) && request.resource.data.created_at == request.time;
+      allow update: if accountActive() && request.auth.uid == uid && profile(request.resource.data) && request.resource.data.created_at == resource.data.created_at;
+      allow delete: if verified() && request.auth.uid == uid && get(/databases/$(database)/documents/workspace_locks/$(uid)).data.deleting == true;
+    }
+    match /workspace_locks/{uid} {
+      allow get: if verified() && request.auth.uid == uid;
+      allow create, update: if verified() && request.auth.uid == uid && request.resource.data.keys().hasOnly(['deleting','updated_at']) &&
+        request.resource.data.deleting == true && request.resource.data.updated_at == request.time;
+      allow list, delete: if false;
+    }
+    function group(d, id) {
+      return d.keys().hasAll(['id','owner_id','name','url','notes','collection','page_id','enabled','last_shared_at','created_at']) &&
+        d.keys().hasOnly(['id','owner_id','name','url','notes','collection','page_id','enabled','last_shared_at','created_at']) &&
+        id == hashId('group', d.url) && d.name is string && d.name.size() >= 2 && d.name.size() <= 120 &&
+        d.url is string && d.url.size() <= 2048 && d.url.matches('^https://www[.]facebook[.]com/groups/[a-zA-Z0-9._-]+$') &&
+        d.notes is string && d.notes.size() <= 2000 && d.collection is string && d.collection.size() <= 80 && d.enabled is bool &&
+        (d.page_id == null || related('connected_pages', d.page_id)) && (d.last_shared_at == null || d.last_shared_at is timestamp);
+    }
+    match /facebook_groups/{id} {
+      allow create: if created(request.resource.data, id) && group(request.resource.data,id) && request.resource.data.last_shared_at == null;
+      allow update: if unchanged(request.resource.data) && group(request.resource.data,id) && request.resource.data.url == resource.data.url &&
+        (request.resource.data.last_shared_at == resource.data.last_shared_at || request.resource.data.last_shared_at == request.time);
+      allow delete: if owner();
+    }
+    function page(d, id) {
+      return d.keys().hasAll(['id','owner_id','name','facebook_page_id','is_default','connection_status','created_at']) &&
+        d.keys().hasOnly(['id','owner_id','name','facebook_page_id','is_default','connection_status','created_at']) &&
+        id == hashId('page', d.facebook_page_id) && d.name is string && d.name.size() >= 2 && d.name.size() <= 120 &&
+        d.facebook_page_id.matches('^[0-9]{1,30}$') && d.connection_status == 'manual' && d.is_default is bool &&
+        d.is_default == (getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.default_page_id == id);
+    }
+    match /connected_pages/{id} {
+      allow create: if created(request.resource.data,id) && page(request.resource.data,id);
+      allow update: if unchanged(request.resource.data) && page(request.resource.data,id) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','is_default','connection_status']);
+      allow delete: if owner();
+    }
+    function post(d, id) {
+      return d.keys().hasAll(['id','owner_id','page_id','caption','post_url','media_type','facebook_post_id','image_url','published_at','created_at']) &&
+        d.keys().hasOnly(['id','owner_id','page_id','caption','post_url','media_type','facebook_post_id','image_url','published_at','created_at']) &&
+        id == hashId('post', d.post_url) && related('connected_pages', d.page_id) && d.caption is string && d.caption.size() <= 10000 &&
+        d.post_url.size() <= 2048 && d.post_url.matches('^https://www[.]facebook[.]com/.+$') && d.media_type in ['text','image','video','link'] &&
+        d.facebook_post_id == null && d.image_url == null && d.published_at == request.time;
+    }
+    match /imported_posts/{id} {
+      allow create: if created(request.resource.data,id) && post(request.resource.data,id);
+      allow update: if false;
+      allow delete: if owner();
+    }
+    function task(d,id) {
+      return d.keys().hasAll(['id','owner_id','post_id','group_id','status','scheduled_at','paused','attempt_count','last_error','confirmation_source','confirmation_note','confirmed_at','version','created_at','updated_at']) &&
+        d.keys().hasOnly(['id','owner_id','post_id','group_id','status','scheduled_at','paused','attempt_count','last_error','confirmation_source','confirmation_note','confirmed_at','version','created_at','updated_at']) &&
+        id == hashId('task', d.post_id + ':' + d.group_id) && related('imported_posts',d.post_id) && related('facebook_groups',d.group_id) &&
+        d.paused is bool && d.version is int && d.attempt_count is int && d.attempt_count >= 0 &&
+        (d.scheduled_at == null || d.scheduled_at is timestamp) && nullableText(d.last_error,1000) && nullableText(d.confirmation_note,1000);
+    }
+    function transition(from,to) {
+      return (from == 'pending' && to in ['scheduled','ready_for_user','cancelled','skipped']) ||
+        (from == 'scheduled' && to in ['pending','ready_for_user','cancelled','skipped']) ||
+        (from == 'ready_for_user' && to in ['awaiting_confirmation','cancelled','skipped']) ||
+        (from == 'awaiting_confirmation' && to in ['confirmed_shared','failed','ready_for_user','cancelled','skipped']) ||
+        (from == 'failed' && to in ['ready_for_user','cancelled','skipped']) || (from == 'skipped' && to == 'ready_for_user');
+    }
+    function confirmation(d) {
+      return d.status == 'confirmed_shared' ?
+        (d.confirmation_source == 'user_attestation' && d.confirmed_at == request.time && d.confirmation_note is string && d.confirmation_note.size() >= 3) :
+        (d.confirmation_source == null && d.confirmed_at == null && d.confirmation_note == null);
+    }
+    function taskUpdate(d) {
+      return d.post_id == resource.data.post_id && d.group_id == resource.data.group_id &&
+        d.version == resource.data.version + 1 && d.updated_at == request.time && (
+          (d.status == resource.data.status && d.diff(resource.data).affectedKeys().hasOnly(['paused','version','updated_at'])) ||
+          (transition(resource.data.status,d.status) && d.paused == resource.data.paused && confirmation(d) &&
+            d.attempt_count == resource.data.attempt_count + (d.status == 'awaiting_confirmation' ? 1 : 0) &&
+            (d.status == 'scheduled' ? d.scheduled_at > request.time : d.scheduled_at == resource.data.scheduled_at))
+        );
+    }
+    match /sharing_tasks/{id} {
+      allow create: if created(request.resource.data,id) && task(request.resource.data,id) && request.resource.data.updated_at == request.time &&
+        request.resource.data.status in ['ready_for_user','scheduled'] &&
+        (request.resource.data.status == 'scheduled' ? request.resource.data.scheduled_at > request.time : request.resource.data.scheduled_at == null) &&
+        getAfter(/databases/$(database)/documents/facebook_groups/$(request.resource.data.group_id)).data.enabled == true &&
+        request.resource.data.version == 0 && request.resource.data.attempt_count == 0 && request.resource.data.last_error == null && request.resource.data.paused == false && confirmation(request.resource.data);
+      allow update: if unchanged(request.resource.data) && task(request.resource.data,id) && taskUpdate(request.resource.data);
+      allow delete: if owner();
+    }
+    match /sharing_attempts/{id} {
+      allow create: if created(request.resource.data,id) && request.resource.data.keys().hasOnly(['id','owner_id','task_id','source','result','created_at']) &&
+        related('sharing_tasks',request.resource.data.task_id) && request.resource.data.source == 'mobile' &&
+        request.resource.data.result == getAfter(/databases/$(database)/documents/sharing_tasks/$(request.resource.data.task_id)).data.status;
+      allow delete: if owner();
+    }
+    match /audit_logs/{id} {
+      allow create: if created(request.resource.data,id) && request.resource.data.keys().hasOnly(['id','owner_id','event_type','source','status','detail','created_at']) &&
+        request.resource.data.event_type is string && request.resource.data.event_type.size() <= 100 && request.resource.data.source == 'mobile' &&
+        request.resource.data.status == 'success' && request.resource.data.detail is string && request.resource.data.detail.size() <= 1000;
+      allow delete: if owner();
+    }
+    match /extension_devices/{id} {
+      allow update: if owner() && active() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked_at']) && request.resource.data.revoked_at == request.time;
+      allow delete: if owner();
+    }
+    match /notifications/{id} { allow delete: if owner(); }
+    match /{table}/{id} {
+      allow get: if table in ['connected_pages','facebook_groups','imported_posts','sharing_tasks','sharing_attempts','audit_logs','notifications','extension_devices'] && verified() && workspaceReadable() && (!exists(/databases/$(database)/documents/$(table)/$(id)) || owner());
+      allow list: if table in ['connected_pages','facebook_groups','imported_posts','sharing_tasks','sharing_attempts','audit_logs','notifications','extension_devices'] && owner() && workspaceReadable();
+    }
+  }
+}

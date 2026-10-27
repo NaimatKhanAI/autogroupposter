@@ -1,0 +1,44 @@
+{
+  "name": "GroupPoster - published Page post to Spark queue",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": { "inputSource": "passthrough" },
+      "id": "published-post-input",
+      "name": "After successful Page publication",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8787/v1/posts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { event: 'page.post.published', event_id: String($json.event_id || $json.post_id || ''), post_url: $json.post_url, caption: $json.caption || '', media_type: $json.media_type || 'link' } }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "spark-intake",
+      "name": "Import and prepare sharing tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [540, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notesInFlow": true,
+      "notes": "Choose an HTTP Header Auth credential: Authorization = Bearer <private bridge token>. The bridge must run on the same host/network. This creates app tasks; it does not publish to Facebook groups."
+    }
+  ],
+  "connections": {
+    "After successful Page publication": {
+      "main": [[{ "node": "Import and prepare sharing tasks", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "tags": []
+}

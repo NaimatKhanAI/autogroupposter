@@ -1,0 +1,17 @@
+rules_version = '2';
+service firebase.storage {
+ match /b/{bucket}/o {
+  function owner(uid) { return request.auth != null && request.auth.uid == uid && request.auth.token.email_verified == true; }
+  function active(uid) { let account=firestore.get(/databases/(default)/documents/agpUsers/$(uid)).data; return account.get('suspended',false)==false && account.get('deletionRequested',false)==false; }
+  match /agpMedia/{uid}/{file} {
+   allow read: if owner(uid) && active(uid);
+   allow create: if resource == null && owner(uid) && active(uid) &&
+     firestore.exists(/databases/(default)/documents/agpUsers/$(uid)/mediaUploads/$(file)) &&
+     firestore.get(/databases/(default)/documents/agpUsers/$(uid)/mediaUploads/$(file)).data.expiresAt > request.time.toMillis() &&
+     request.resource.size == firestore.get(/databases/(default)/documents/agpUsers/$(uid)/mediaUploads/$(file)).data.size &&
+     request.resource.contentType == firestore.get(/databases/(default)/documents/agpUsers/$(uid)/mediaUploads/$(file)).data.contentType &&
+     request.resource.size <= 8*1024*1024 && request.resource.contentType in ['image/png','image/jpeg','image/webp'];
+   allow update,delete: if false;
+  }
+ }
+}

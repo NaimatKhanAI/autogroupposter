@@ -1,0 +1,61 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "commercial",
+      "predeploy": [
+        "npm --prefix functions run build"
+      ],
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log",
+        ".secret.local"
+      ]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "dist/website",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "emulators": {
+    "auth": {
+      "port": 9195
+    },
+    "firestore": {
+      "port": 8185
+    },
+    "functions": {
+      "port": 5105
+    },
+    "storage": {
+      "port": 9295
+    },
+    "ui": {
+      "enabled": false
+    },
+    "hub": {
+      "port": 4415
+    },
+    "logging": {
+      "port": 4515
+    }
+  }
+}
